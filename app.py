@@ -1,145 +1,72 @@
-import json
-import os
-import requests
-from sys import stderr
-from flask import Flask, request, jsonify
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+from flask_socketio import SocketIO, emit, join_room, rooms
+
+from publish import handler as publish_handler
 
 app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "*"}})
+app.config["SECRET_KEY"] = "secret!"
+socketio = SocketIO(app, cors_allowed_origins="*")
 
-api_key = os.environ.get("API_KEY", "")
-if api_key == "":
-    print("api key is required", file=stderr)
+users = {}
 
-api_base_url = "https://api.stagingv3.microgen.id/query/api/v1/" + api_key
 
-@app.route('/')
-def hello_geek():
-    return '<h1>Hello from Flask</h2>'
+@app.route("/")
+def home():
+    return "<h1>Welcome to Khayangan</h1>"
 
-@app.get("/products")
-def getProducts():
-    try:
-        url = "/".join([api_base_url, "products"])
-        response = requests.get(url)
-        respBody = response.json()
 
-        if response.status_code != 200:
-            if respBody.get('message') == 'project not found':
-                respJson = jsonify(
-                    {"message": "failed to connect to your project, please check if the api had been set properly."}, 
-                )
-                respJson.status_code = response.status_code
+@app.route("/test")
+def test():
+    socketio.emit("response", {"from": "server", "data": "Ini cuma test bro"})
+    return "Success emit test to client"
 
-                return respJson
 
-            respJson = jsonify(respBody)
-            respJson.status_code = response.status_code
+@app.route("/test/<message>")
+def test_msg(msg):
+    print("msg: ", msg)
+    socketio.emit("response", {"from": "server", "data": msg})
+    return "Success emit test to client"
 
-            return respJson
 
-        return jsonify(respBody)
-    except Exception as e:
-        return jsonify({"message": "error occured: " + e.__str__()})
+@app.route("/event", methods=["POST"])
+def publish_event():
+    return publish_handler(request, jsonify, socketio)
 
-@app.post("/products")
-def createProduct():
-    try:
-        url = "/".join([api_base_url, "products"])
-        response = requests.post(url, json.dumps(request.json, indent=2))
-        respBody = response.json()
 
-        if response.status_code != 201:
-            if respBody.get('message') == 'project not found':
-                respJson = jsonify(
-                    {"message": "failed to connect to your project, please check if the api had been set properly."}, 
-                )
-                respJson.status_code = response.status_code
+@socketio.on("setSocketId")
+def set_socket_id(data):
+    print(data)
+    email = data["email"]
+    name = data["name"]
+    socket_id = data["socketId"]
+    users[email] = socket_id
 
-                return respJson
+    # emit to socketId
+    emit("response", {"email": email, "name": name}, to=socket_id)
 
-            respJson = jsonify(respBody)
-            respJson.status_code = response.status_code
 
-            return respJson
-        
-        return jsonify(respBody)
-    except Exception as e:
-        return jsonify({"message": "error occured: " + e.__str__()})
+@socketio.on("joinRoom")
+def on_join(data):
+    print(data)
+    room = data["room"]
+    join_room(room)
+    emit("response", "Joined " + room, room=room)
+    # print list of rooms
+    print(rooms())
 
-@app.get("/products/<id>")
-def getProductById(id):
-    try:
-        url = "/".join([api_base_url, "products", id])
-        response = requests.get(url)
-        respBody = response.json()
 
-        if response.status_code != 200:
-            if respBody.get('message') == 'project not found':
-                respJson = jsonify(
-                    {"message": "failed to connect to your project, please check if the api had been set properly."}, 
-                )
-                respJson.status_code = response.status_code
+@socketio.on("message")
+def message(data):
+    print(data)  # {'from': 'client'}
+    emit("response", {"from": "server"})
 
-                return respJson
 
-            respJson = jsonify(respBody)
-            respJson.status_code = response.status_code
+# @socketio.on('request')
+# def request(data):
+#     print(data)  # {'from': 'client'}
 
-            return respJson
-
-        return jsonify(respBody)
-    except Exception as e:
-        return jsonify({"message": "error occured: " + e.__str__()})
-
-@app.patch("/products/<id>")
-def updateProduct(id):
-    try:
-        url = "/".join([api_base_url, "products", id])
-        response = requests.patch(url, json.dumps(request.json, indent=2))
-        respBody = response.json()
-
-        if response.status_code != 200:
-            if respBody.get('message') == 'project not found':
-                respJson = jsonify(
-                    {"message": "failed to connect to your project, please check if the api had been set properly."}, 
-                )
-                respJson.status_code = response.status_code
-
-                return respJson
-
-            respJson = jsonify(respBody)
-            respJson.status_code = response.status_code
-
-            return respJson
-        
-        return jsonify(respBody)
-    except Exception as e:
-        return jsonify({"message": "error occured: " + e.__str__()})
-
-@app.delete("/products/<id>")
-def deleteProduct(id):
-    try:
-        url = "/".join([api_base_url, "products", id])
-        response = requests.delete(url)
-        respBody = response.json()
-
-        if response.status_code != 200:
-            if respBody.get('message') == 'project not found':
-                respJson = jsonify(
-                    {"message": "failed to connect to your project, please check if the api had been set properly."}, 
-                )
-                respJson.status_code = response.status_code
-
-                return respJson
-
-            respJson = jsonify(respBody)
-            respJson.status_code = response.status_code
-
-            return respJson
-
-        return jsonify(respBody)
-    except Exception as e:
-        return jsonify({"message": "error occured: " + e.__str__()})
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    socketio.run(app)
